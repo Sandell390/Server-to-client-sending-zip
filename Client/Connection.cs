@@ -62,45 +62,65 @@ namespace Client
 
 
             int received = _clientSocket.Receive(buffer2, SocketFlags.None);
-            if (received == 0) return;
+
             var data = new byte[received];
             Array.Copy(buffer2, data, received);
 
-            string zipPath = AppDomain.CurrentDomain.BaseDirectory + "\\ZippedSongs.zip";
-            string extractPath = AppDomain.CurrentDomain.BaseDirectory + "\\Songs";
+            int numberOfZips = int.Parse(Encoding.UTF8.GetString(data));
 
-            //File.WriteAllBytes(extractPath, data);
-
-            /*
-            using (NetworkStream networkStream = new NetworkStream(_clientSocket)) 
+            for (int i = 0; i < numberOfZips; i++)
             {
-                using (FileStream fileStream = File.Create(zipPath))
+                if (!_clientSocket.Connected)
                 {
-                    await networkStream.CopyToAsync(fileStream);
-                    
+                    _clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    await LoopConnectAsync();
                 }
-            }
-            */
 
-            using (var compressedFileStream = new MemoryStream(data))
-            {
-                using (FileStream stream = File.OpenWrite(zipPath)) 
+                received = _clientSocket.Receive(buffer2, SocketFlags.None);
+                if (received == 0) return;
+                data = new byte[received];
+                Array.Copy(buffer2, data, received);
+
+                
+
+                string zipPath = AppDomain.CurrentDomain.BaseDirectory + $"\\{i}ZippedSongs.zip";
+                string extractPath = AppDomain.CurrentDomain.BaseDirectory + "\\Songs";
+
+                //File.WriteAllBytes(extractPath, data);
+
+                /*
+                using (NetworkStream networkStream = new NetworkStream(_clientSocket)) 
                 {
-                   await compressedFileStream.CopyToAsync(stream);
-                }
-            }
+                    using (FileStream fileStream = File.Create(zipPath))
+                    {
+                        await networkStream.CopyToAsync(fileStream);
 
-            using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Update))
-            {
-                foreach (var entry in archive.Entries)
+                    }
+                }
+                */
+
+                using (var compressedFileStream = new MemoryStream(data))
                 {
-                    entry.ExtractToFile(extractPath + "\\" + entry.FullName, true);
+                    using (FileStream stream = File.OpenWrite(zipPath))
+                    {
+                        await compressedFileStream.CopyToAsync(stream);
+                    }
                 }
+
+                using (ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Update))
+                {
+                    foreach (var entry in archive.Entries)
+                    {
+                        entry.ExtractToFile(extractPath + "\\" + entry.FullName, true);
+                    }
+                }
+
+                File.Delete(zipPath);
+
+                //_clientSocket.Close();
             }
 
-            File.Delete(zipPath);
-
-           _clientSocket.Close();
+            
 
         }
 
