@@ -42,9 +42,6 @@ namespace Server
             _server.Bind(new IPEndPoint(IPAddress.Any, 100));
             _server.Listen(5);
             _server.BeginAccept(new AsyncCallback(AcceptCallback), null);
-
-            Console.WriteLine("Making Json File");
-            JsonHandler.FirstRead();
         }
 
         
@@ -69,6 +66,42 @@ namespace Server
             string text = Encoding.UTF8.GetString(databuf);
             Console.WriteLine("Text received:" + text);
 
+
+            if (text.Contains("send")) 
+            {
+                sendZip(socket , text);
+            }
+            else if(text.Contains("files"))
+            {
+                sendListFiles(socket);
+            }
+            else 
+            {
+                Console.WriteLine("Something is wrong, Did not get the right string from client");
+            }
+
+
+        }
+
+        private static void sendListFiles(Socket socket)
+        {
+            byte[] data;
+
+            string musicPath = AppDomain.CurrentDomain.BaseDirectory + "\\Musik";
+
+            List<string> listFiles = Directory.GetFiles(musicPath).Select(Path.GetFileName).ToList();
+
+            string fullList = string.Empty;
+
+            listFiles.ForEach(x => fullList += x + ";");
+
+            data = Encoding.UTF8.GetBytes(fullList);
+
+            socket.BeginSend(data, 0, data.Length, SocketFlags.None, new AsyncCallback(SendCallback), socket);
+        }
+
+        private static void sendZip(Socket socket, string text)
+        {
             byte[] data;
 
             int count = 0;
@@ -76,36 +109,56 @@ namespace Server
             string musicPath = AppDomain.CurrentDomain.BaseDirectory + "\\Musik";
             string zipPath = AppDomain.CurrentDomain.BaseDirectory + $"\\{count}ZippedSongs.zip";
 
-            if (text == "song") 
+            int maxZip = 1024 * 5000;
+
+            int fileLenght = 0;
+
+            List<string> filesList = new List<string>();
+
+            int previousPoint = 0;
+
+            previousPoint = text.IndexOf(":");
+
+            text = text.Replace(text, text.Remove(0, previousPoint + 1));
+
+            for (int i = 0; i < text.Length; i++)
             {
-                int maxZip = 1024 * 5000;
+                previousPoint = text.IndexOf(";");
 
-                int fileLenght = 0;
+                filesList.Add(text.Substring(0, previousPoint));
 
-                string[] path = Directory.GetFiles(musicPath);
-                List<string> tempFiles = new List<string>();
+                text = text.Replace(text, text.Remove(0, previousPoint + 1));
+            }
 
-                List<string> allZips = new List<string>();
 
-                int countEntities = 0;
+            filesList.ForEach(x => Console.WriteLine(x));
+            
+            List<string> path = new List<string>();
 
-                foreach (var item in path)
+            filesList.ForEach(x => path.Add(musicPath + "\\" + x));
+
+            Console.WriteLine(path.Count);
+
+            List<string> tempFiles = new List<string>();
+
+            List<string> allZips = new List<string>();
+
+            int countEntities = 0;
+
+            foreach (var item in path)
+            {
+                Console.WriteLine("Path: " + item);
+                Console.WriteLine("Lenght: " + fileLenght);
+
+                if (File.ReadAllBytes(item).Length  < maxZip) 
                 {
-                    Console.WriteLine("Path: " + item);
-                    Console.WriteLine("Lenght: " + fileLenght);
-                    
-
-                    if (File.ReadAllBytes(item).Length < maxZip)
-                        fileLenght += File.ReadAllBytes(item).Length;
-                    else
+                    if (fileLenght + File.ReadAllBytes(item).Length < maxZip) 
                     {
-                        Console.WriteLine($"Too large file, name: {Directory.GetFiles(item).Select(Path.GetFileName)}");
-                        continue;
+                        tempFiles.Add(item);
+                        
                     }
 
-                    tempFiles.Add(item);
-
-                    if (fileLenght > maxZip || countEntities == path.Length - 1)
+                    if (fileLenght + File.ReadAllBytes(item).Length > maxZip || item == path[path.Count - 1])
                     {
                         var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
 
@@ -121,59 +174,43 @@ namespace Server
                         count++;
                         tempFiles.Clear();
                         fileLenght = 0;
-                        
+
                         zipPath = AppDomain.CurrentDomain.BaseDirectory + $"\\{count}ZippedSongs.zip";
                     }
 
-                    countEntities++;
+                    fileLenght += File.ReadAllBytes(item).Length;
 
-
-                    Console.WriteLine("Enities: " + countEntities);
+                }
+                else
+                {
+                    Console.WriteLine($"Too large file, name: {Directory.GetFiles(item).Select(Path.GetFileName)}");
+                    continue;
                 }
 
                 
 
-                //ZipFile.CreateFromDirectory(musicPath, zipPath);
+                Console.WriteLine("Enities: " + countEntities);
+            }
 
-                data = Encoding.UTF8.GetBytes(allZips.Count.ToString());
+            data = Encoding.UTF8.GetBytes(allZips.Count.ToString());
+
+            socket.BeginSend(data, 0, data.Length, SocketFlags.None, new AsyncCallback(SendCallback), socket);
+
+            Console.WriteLine(allZips.Count + " zips sent");
+
+            for (int i = 0; i < allZips.Count; i++)
+            {
+
+                data = File.ReadAllBytes(allZips[i]);
 
                 socket.BeginSend(data, 0, data.Length, SocketFlags.None, new AsyncCallback(SendCallback), socket);
 
-                Console.WriteLine(allZips.Count + " zips sent");
+                File.Delete(allZips[i]);
 
-                for (int i = 0; i < allZips.Count; i++)
-                {
-
-                    data = File.ReadAllBytes(allZips[i]);
-
-                    socket.BeginSend(data, 0, data.Length, SocketFlags.None, new AsyncCallback(SendCallback), socket);
-
-                    File.Delete(allZips[i]);
-
-                    Thread.Sleep(900);  
-                }
-
-                allZips.Clear();
-
-                /*
-                using (ZipArchive Ziparchive = ZipFile.Open(zipPath, ZipArchiveMode.Update))
-                {
-                    foreach (var entry in Ziparchive.Entries)
-                    {
-                        Console.WriteLine($"Zip File size/name: {entry.CompressedLength} / {entry.Name}");
-                        fileLenght += int.Parse(entry.CompressedLength.ToString());
-                    }
-                }
-                
-                */
-
-                
-            }
-            else 
-            {
-                data = Encoding.UTF8.GetBytes("Wrong");
+                Thread.Sleep(900);
             }
 
+            allZips.Clear();
         }
 
         private static void SendCallback(IAsyncResult AR) 
